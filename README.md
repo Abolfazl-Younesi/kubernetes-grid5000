@@ -1,3 +1,4 @@
+
 # Kubernetes Setup Guide
 
 This guide provides steps to set up Kubernetes on a Linux machine, including installation of required packages, Kubernetes components, and container runtime. It also covers networking and firewall configurations, adding multiple nodes to a cluster, and managing multiple clusters.
@@ -87,45 +88,85 @@ sudo-g5k firewall-cmd --reload
 
 ## Adding Multiple Nodes to a Single Kubernetes Cluster
 
+### Example for Multi-Node Single Cluster
+
 1. **Initialize the Control Plane (Master Node):**
-   Run the following on the primary node:
+   On the primary node, run:
    ```bash
-   sudo-g5k kubeadm init
+   sudo-g5k kubeadm init --pod-network-cidr=10.244.0.0/16
    ```
-   This command outputs a `kubeadm join` command (similar to below) for adding worker nodes:
+   After initialization, Kubernetes will provide a `kubeadm join` command with a token and a hash, which allows worker nodes to join the cluster. The command looks like this:
    ```bash
    kubeadm join <master-ip>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
    ```
 
-2. **Install Kubernetes on Each Worker Node:**
-   Follow the above steps to install `kubelet`, `kubeadm`, `kubectl`, and `containerd` on each worker node, but **do not run `kubeadm init`** on these nodes.
+2. **Where to Find the Token:**
+   - If you lose the token or need to regenerate it, you can retrieve it on the control plane node:
+     ```bash
+     sudo-g5k kubeadm token list
+     ```
+   - To generate a new token, run:
+     ```bash
+     sudo-g5k kubeadm token create
+     ```
+
+   The discovery token CA certificate hash can be found with:
+   ```bash
+   openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | \
+   openssl rsa -pubin -outform der 2>/dev/null | \
+   openssl dgst -sha256 -hex | sed 's/^.* //'
+   ```
 
 3. **Join Worker Nodes to the Cluster:**
-   Run the `kubeadm join` command on each worker node:
+   Once you have the token and hash, use the following format to join each worker node:
    ```bash
    sudo-g5k kubeadm join <master-ip>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
    ```
-   This command connects each worker node to the control plane, forming a multi-node cluster. Verify with:
+   - **Example:**
+     If your master node IP address is `192.168.1.10`, your token is `abcdef.0123456789abcdef`, and your hash is `1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef`, the command would be:
+     ```bash
+     sudo-g5k kubeadm join 192.168.1.10:6443 --token abcdef.0123456789abcdef --discovery-token-ca-cert-hash sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+     ```
+   After running this command on each worker node, you can verify that the nodes have joined the cluster by running:
    ```bash
    kubectl get nodes
    ```
 
 ## Setting Up Multiple Clusters
 
-To set up multiple independent clusters, each with its own control plane and worker nodes:
+### Example for Multiple Independent Clusters
+
+To create two independent clusters, repeat the following steps for each primary node to act as a control plane for a separate cluster.
 
 1. **Initialize Each Control Plane Separately:**
-   Run `kubeadm init` on a primary node for each cluster. Each control plane will have its own independent configuration.
+   Run `kubeadm init` on each cluster’s main node with different network configurations to avoid IP conflicts:
+   ```bash
+   sudo-g5k kubeadm init --pod-network-cidr=10.244.0.0/16  # for Cluster 1
+   sudo-g5k kubeadm init --pod-network-cidr=10.245.0.0/16  # for Cluster 2
+   ```
+   Each `kubeadm init` command generates a unique `kubeadm join` command specific to its cluster.
 
 2. **Manage Clusters with `kubectl` Contexts:**
-   Use `kubectl` contexts to switch between clusters:
+   Use `kubectl` contexts to switch between clusters. For example:
    ```bash
-   kubectl config use-context <context-name>
+   # Add Cluster 1
+   kubectl config set-context cluster1 --cluster=cluster1 --user=user1 --namespace=default
+   kubectl config use-context cluster1
+
+   # Add Cluster 2
+   kubectl config set-context cluster2 --cluster=cluster2 --user=user2 --namespace=default
+   kubectl config use-context cluster2
    ```
-   To list or add contexts, use:
+
+3. **Verify Cluster Contexts:**
+   Use the following command to list all contexts:
    ```bash
    kubectl config get-contexts
-   kubectl config set-context <context-name>
+   ```
+   Switching between clusters is done by specifying the desired context:
+   ```bash
+   kubectl config use-context cluster1  # Switch to Cluster 1
+   kubectl config use-context cluster2  # Switch to Cluster 2
    ```
 
 ## All-in-One Command for Single Cluster Setup
@@ -149,7 +190,9 @@ sudo-g5k sysctl -w net.ipv4.ip_forward=1 && \
 sudo-g5k swapoff -a && \
 (crontab -l 2>/dev/null; echo "@reboot /sbin/swapoff -a") | crontab - || true && \
 sudo-g5k firewall-cmd --zone=public --add-port=6443/tcp --permanent && \
-sudo-g5k firewall-cmd --zone=public --add-port=10250/tcp --permanent && \
+sudo-g5k firewall-cmd --zone=public --add-port=10250/t
+
+cp --permanent && \
 sudo-g5k firewall-cmd --zone=trusted --add-source=192.168.0.0/16 --permanent && \
 sudo-g5k firewall-cmd --zone=trusted --add-source=10.140.0.0/16 --permanent && \
 sudo-g5k firewall-cmd --reload
@@ -176,4 +219,4 @@ Refer to the Kubernetes documentation for more advanced cluster setups and confi
 This guide is provided under the MIT License.
 ```
 
-This README includes instructions for creating a multi-node single cluster and setting up multiple clusters, making it versatile for different Kubernetes setups.
+This README now includes detailed instructions on where to find the token, as well as an example with placeholders (`master IP`, `token`, `hash`) explained.
